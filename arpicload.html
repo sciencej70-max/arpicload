@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR 가상옷 직접 디자인 하기</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1a202c; /* tailwind gray-900 */
+        }
+        #canvas {
+            touch-action: none; /* 방해되는 브라우저 기본 터치 액션 방지 */
+        }
+        .controls-enter {
+            animation: slideUp 0.3s ease-out forwards;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        /* 투명도 확인용 체크무늬 (포토샵 스타일) 배경 추가 */
+        .checkerboard {
+            background-color: #f3f4f6; /* tailwind gray-100 */
+            background-image: 
+                linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb), /* tailwind gray-200 */
+                linear-gradient(45deg, #e5e7eb 25%, transparent 25%, transparent 75%, #e5e7eb 75%, #e5e7eb);
+            background-size: 20px 20px;
+            background-position: 0 0, 10px 10px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 w-full h-[100dvh] overflow-hidden flex flex-col items-center justify-center text-gray-800">
+
+    <!-- 모든 기기 및 방향에서 화면에 꽉 차도록 사이즈 고정(모의 폰 형태) 해제 -->
+    <div id="app-container" class="relative w-full h-full checkerboard overflow-hidden">
+        
+        <!-- 카메라 비디오 화면 (가장 아래 레이어) -->
+        <video id="camera" class="absolute top-0 left-0 w-full h-full object-cover z-0" autoplay playsinline muted></video>
+
+        <!-- 사진을 그리고 지우는 캔버스 화면 (비디오 위 레이어) -->
+        <canvas id="canvas" class="absolute top-0 left-0 w-full h-full z-10 cursor-crosshair"></canvas>
+
+        <!-- 촬영 버튼 (우측 상단 플로팅) -->
+        <button id="captureBtn" class="absolute top-4 right-4 z-40 bg-white/90 backdrop-blur-md text-gray-800 p-3.5 rounded-full shadow-lg hover:bg-gray-100 transition-transform transform active:scale-90 flex items-center justify-center border border-gray-200" title="화면 촬영">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+        </button>
+
+        <!-- 하단 컨트롤 패널 (열고 닫기 가능) -->
+        <div id="controlPanel" class="absolute bottom-0 left-0 w-full z-30 bg-white/95 backdrop-blur-md rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.15)] transition-transform duration-300 ease-in-out translate-y-0">
+            
+            <!-- 패널 토글 손잡이 -->
+            <button id="panelToggleBtn" class="w-full h-8 flex justify-center items-center cursor-pointer focus:outline-none hover:bg-gray-50 rounded-t-3xl transition-colors">
+                <div class="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+            </button>
+
+            <!-- 패널 내용 -->
+            <div class="px-5 pb-6 flex flex-col gap-4">
+                <!-- 파일 업로드 -->
+                <div class="flex flex-col gap-2 bg-gray-100 p-3 rounded-xl border border-gray-200">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-sm font-semibold flex-shrink-0">📷 사진 불러오기</span>
+                            <!-- 샘플사진 버튼 추가 -->
+                            <button id="sampleImageBtn" class="bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold py-1 px-2 rounded-md text-xs transition-colors border border-blue-200 shadow-sm">
+                                샘플사진
+                            </button>
+                        </div>
+                        <!-- 고급 편집 토글 버튼 추가 -->
+                        <button id="toggleAdvancedBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-3 rounded-lg text-xs transition-colors shadow-sm border border-gray-300 flex items-center gap-1">
+                            🛠️ 고급 편집
+                        </button>
+                    </div>
+                    <input type="file" id="imageLoader" accept="image/*" class="text-sm w-full file:mr-3 file:py-1.5 file:px-3 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                </div>
+
+                <!-- 고급 편집 컨트롤 (초기 숨김) -->
+                <div id="advancedControls" class="hidden flex-col gap-4">
+                    <!-- 투명 사진 저장 -->
+                    <button id="saveTransparentBtn" class="w-full bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold py-2 rounded-xl text-sm transition-colors shadow-sm border border-blue-200 flex justify-center items-center gap-2" title="투명해진 영역을 보존하여 저장합니다">
+                        💾 투명 사진 저장
+                    </button>
+
+                    <!-- 도구 선택 버튼 -->
+                    <div class="flex gap-2">
+                        <button id="toolManualBtn" class="flex-1 bg-white text-gray-700 font-bold py-2 rounded-xl text-sm transition-colors border-2 border-gray-200 hover:border-indigo-300">수동 지우개</button>
+                        <button id="toolAutoBtn" class="flex-1 bg-indigo-600 text-white font-bold py-2 rounded-xl text-sm transition-colors border-2 border-indigo-600">자동 지우개(마법봉)</button>
+                    </div>
+
+                    <!-- 옵션 조절 패널 -->
+                    <div id="manualOptions" class="hidden items-center gap-3 px-1">
+                        <label class="text-sm font-semibold whitespace-nowrap">지우개 굵기</label>
+                        <input type="range" id="brushSize" min="5" max="80" value="30" class="w-full accent-indigo-600 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <div id="autoOptions" class="flex items-center gap-3 px-1">
+                        <label class="text-sm font-semibold whitespace-nowrap">색상 유사도</label>
+                        <input type="range" id="tolerance" min="0" max="150" value="40" class="w-full accent-indigo-600 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- 전체화면 버튼 -->
+                    <button id="fullscreenBtn" class="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold py-2.5 rounded-xl text-sm transition-colors border border-blue-200 shadow-sm flex items-center justify-center gap-2">
+                        🖥️ 전체화면 모드
+                    </button>
+
+                    <!-- 되돌리기 / 원본 복구 버튼 -->
+                    <div class="flex gap-2">
+                        <button id="undoBtn" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm transition-colors shadow-sm border border-gray-200 flex justify-center items-center gap-1">
+                            ↩ 되돌리기
+                        </button>
+                        <button id="resetCanvasBtn" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2.5 rounded-xl text-sm transition-colors shadow-sm border border-gray-200 flex justify-center items-center gap-1">
+                            🔄 원본 복구
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 카메라 켜기 버튼 -->
+                <button id="startCamBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                    카메라 켜기
+                </button>
+            </div>
+        </div>
+
+        <!-- 안내 모달 (에러 처리용) -->
+        <div id="messageModal" class="hidden absolute inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+            <div class="bg-white p-6 rounded-2xl shadow-xl max-w-sm w-full text-center">
+                <h3 id="messageTitle" class="text-lg font-bold mb-2">알림</h3>
+                <p id="messageBody" class="text-gray-600 mb-5"></p>
+                <button id="closeModalBtn" class="w-full bg-indigo-600 text-white font-bold py-2 rounded-xl">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const appContainer = document.getElementById('app-container');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const video = document.getElementById('camera');
+        
+        const imageLoader = document.getElementById('imageLoader');
+        const sampleImageBtn = document.getElementById('sampleImageBtn');
+        const toggleAdvancedBtn = document.getElementById('toggleAdvancedBtn');
+        const advancedControls = document.getElementById('advancedControls');
+        const saveTransparentBtn = document.getElementById('saveTransparentBtn');
+        
+        const toolManualBtn = document.getElementById('toolManualBtn');
+        const toolAutoBtn = document.getElementById('toolAutoBtn');
+        const manualOptions = document.getElementById('manualOptions');
+        const autoOptions = document.getElementById('autoOptions');
+        const toleranceInput = document.getElementById('tolerance');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+        const brushSizeInput = document.getElementById('brushSize');
+        const undoBtn = document.getElementById('undoBtn');
+        const resetCanvasBtn = document.getElementById('resetCanvasBtn');
+        const startCamBtn = document.getElementById('startCamBtn');
+        const captureBtn = document.getElementById('captureBtn');
+
+        const controlPanel = document.getElementById('controlPanel');
+        const panelToggleBtn = document.getElementById('panelToggleBtn');
+
+        const messageModal = document.getElementById('messageModal');
+        const messageTitle = document.getElementById('messageTitle');
+        const messageBody = document.getElementById('messageBody');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+
+        let currentImg = null;
+        let imgBounds = null; // 이미지 여백 보호용 영역 저장
+        let isDrawing = false;
+        let stream = null;
+        let currentTool = 'auto'; // 'manual' or 'auto'
+        let isPanelOpen = true;
+        let isAdvancedMode = false; // 고급 편집 모드 상태
+        
+        // 작업 이력을 저장할 배열 (최대 20개 저장)
+        let undoHistory = [];
+
+        // 현재 캔버스 상태를 저장하는 함수
+        function saveState() {
+            if (!currentImg) return;
+            undoHistory.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            if (undoHistory.length > 20) {
+                undoHistory.shift();
+            }
+        }
+
+        // 되돌리기 로직
+        undoBtn.addEventListener('click', () => {
+            if (undoHistory.length > 0) {
+                const prevState = undoHistory.pop();
+                ctx.putImageData(prevState, 0, 0);
+            } else {
+                showMessage("안내", "더 이상 되돌릴 작업이 없습니다.");
+            }
+        });
+
+        // 패널 열고 닫기 로직
+        panelToggleBtn.addEventListener('click', () => {
+            isPanelOpen = !isPanelOpen;
+            if (isPanelOpen) {
+                controlPanel.classList.remove('translate-y-[calc(100%-2rem)]');
+                controlPanel.classList.add('translate-y-0');
+            } else {
+                controlPanel.classList.remove('translate-y-0');
+                controlPanel.classList.add('translate-y-[calc(100%-2rem)]');
+            }
+        });
+
+        // 고급 편집 토글 로직
+        toggleAdvancedBtn.addEventListener('click', () => {
+            isAdvancedMode = !isAdvancedMode;
+            if (isAdvancedMode) {
+                advancedControls.classList.remove('hidden');
+                advancedControls.classList.add('flex');
+                toggleAdvancedBtn.classList.replace('bg-gray-200', 'bg-indigo-100');
+                toggleAdvancedBtn.classList.replace('text-gray-700', 'text-indigo-700');
+                toggleAdvancedBtn.innerHTML = '닫기 ✕';
+            } else {
+                advancedControls.classList.add('hidden');
+                advancedControls.classList.remove('flex');
+                toggleAdvancedBtn.classList.replace('bg-indigo-100', 'bg-gray-200');
+                toggleAdvancedBtn.classList.replace('text-indigo-700', 'text-gray-700');
+                toggleAdvancedBtn.innerHTML = '🛠️ 고급 편집';
+            }
+        });
+
+        // 도구 선택 UI 로직
+        toolManualBtn.addEventListener('click', () => {
+            currentTool = 'manual';
+            toolManualBtn.classList.replace('bg-white', 'bg-indigo-600');
+            toolManualBtn.classList.replace('text-gray-700', 'text-white');
+            toolManualBtn.classList.replace('border-gray-200', 'border-indigo-600');
+            
+            toolAutoBtn.classList.replace('bg-indigo-600', 'bg-white');
+            toolAutoBtn.classList.replace('text-white', 'text-gray-700');
+            toolAutoBtn.classList.replace('border-indigo-600', 'border-gray-200');
+
+            manualOptions.classList.remove('hidden');
+            manualOptions.classList.add('flex');
+            autoOptions.classList.remove('flex');
+            autoOptions.classList.add('hidden');
+        });
+
+        toolAutoBtn.addEventListener('click', () => {
+            currentTool = 'auto';
+            toolAutoBtn.classList.replace('bg-white', 'bg-indigo-600');
+            toolAutoBtn.classList.replace('text-gray-700', 'text-white');
+            toolAutoBtn.classList.replace('border-gray-200', 'border-indigo-600');
+            
+            toolManualBtn.classList.replace('bg-indigo-600', 'bg-white');
+            toolManualBtn.classList.replace('text-white', 'text-gray-700');
+            toolManualBtn.classList.replace('border-indigo-600', 'border-gray-200');
+
+            autoOptions.classList.remove('hidden');
+            autoOptions.classList.add('flex');
+            manualOptions.classList.remove('flex');
+            manualOptions.classList.add('hidden');
+        });
+
+        // 전체화면 로직
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                const elem = document.documentElement;
+                if (elem.requestFullscreen) {
+                    elem.requestFullscreen().catch(err => {
+                        showMessage("알림", "전체화면을 지원하지 않는 브라우저입니다.");
+                    });
+                } else if (elem.webkitRequestFullscreen) { // Safari Fallback
+                    elem.webkitRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) { // Safari Fallback
+                    document.webkitExitFullscreen();
+                }
+            }
+        });
+
+        function updateFullscreenText() {
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+                fullscreenBtn.innerHTML = '🖥️ 전체화면 종료';
+            } else {
+                fullscreenBtn.innerHTML = '🖥️ 전체화면 모드';
+            }
+            setTimeout(resizeCanvas, 100);
+        }
+
+        document.addEventListener('fullscreenchange', updateFullscreenText);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenText);
+
+        // 찰칵 소리 생성 (웹 오디오 API 활용 - 외부 파일 불필요)
+        function playShutterSound() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+
+            function createClick(startTime) {
+                // 기계적인 딸깍 소리
+                const osc = ctx.createOscillator();
+                const oscGain = ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, startTime);
+                osc.frequency.exponentialRampToValueAtTime(50, startTime + 0.05);
+                oscGain.gain.setValueAtTime(0.6, startTime);
+                oscGain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.05);
+                osc.connect(oscGain);
+                oscGain.connect(ctx.destination);
+                osc.start(startTime);
+                osc.stop(startTime + 0.05);
+
+                // 마찰음 (화이트 노이즈)
+                const bufferSize = ctx.sampleRate * 0.05;
+                const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = ctx.createBufferSource();
+                noise.buffer = buffer;
+                const noiseGain = ctx.createGain();
+                noiseGain.gain.setValueAtTime(0.3, startTime);
+                noiseGain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.05);
+                noise.connect(noiseGain);
+                noiseGain.connect(ctx.destination);
+                noise.start(startTime);
+            }
+
+            createClick(ctx.currentTime);        // '찰'
+            createClick(ctx.currentTime + 0.08); // '칵'
+        }
+
+        // 투명 사진 저장 로직 (여백 제외 이미지 영역만 PNG로 저장)
+        saveTransparentBtn.addEventListener('click', () => {
+            if (!currentImg || !imgBounds) {
+                showMessage("안내", "사진을 불러오고 편집한 후 저장할 수 있습니다.");
+                return;
+            }
+
+            const cx = Math.floor(imgBounds.x);
+            const cy = Math.floor(imgBounds.y);
+            const cw = Math.floor(imgBounds.w);
+            const ch = Math.floor(imgBounds.h);
+
+            // 이미지 영역 크기만큼의 크롭용 캔버스 생성
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = cw;
+            cropCanvas.height = ch;
+            const cropCtx = cropCanvas.getContext('2d');
+
+            // 원본 캔버스에서 해당 이미지 영역만 복사해옴
+            cropCtx.drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+
+            const link = document.createElement('a');
+            link.download = 'AR_design_transparent.png';
+            link.href = cropCanvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // 화면 촬영(캡처) 로직 (불러들인 그림 영역만 크롭하여 카메라+사진 합성 저장)
+        captureBtn.addEventListener('click', () => {
+            if (!currentImg || !imgBounds) {
+                showMessage("안내", "사진을 먼저 불러와주세요.");
+                return;
+            }
+
+            // 찰칵 소리 재생 및 카메라 플래시 번쩍임 효과
+            playShutterSound();
+            
+            const flash = document.createElement('div');
+            flash.className = 'absolute inset-0 bg-white z-50 pointer-events-none transition-opacity duration-200 opacity-80';
+            appContainer.appendChild(flash);
+            setTimeout(() => {
+                flash.classList.replace('opacity-80', 'opacity-0');
+                setTimeout(() => flash.remove(), 200);
+            }, 50);
+
+            const cx = Math.floor(imgBounds.x);
+            const cy = Math.floor(imgBounds.y);
+            const cw = Math.floor(imgBounds.w);
+            const ch = Math.floor(imgBounds.h);
+
+            // 1. 전체 화면 크기의 합성 캔버스
+            const fullCanvas = document.createElement('canvas');
+            fullCanvas.width = canvas.width;
+            fullCanvas.height = canvas.height;
+            const fullCtx = fullCanvas.getContext('2d');
+
+            // 카메라 영상이 켜져있으면 먼저 캔버스 전체에 깔아줌 (Object-Cover 비율)
+            if (stream && video.videoWidth > 0) {
+                const canvasRatio = fullCanvas.width / fullCanvas.height;
+                const videoRatio = video.videoWidth / video.videoHeight;
+                let drawWidth = fullCanvas.width;
+                let drawHeight = fullCanvas.height;
+                let offsetX = 0;
+                let offsetY = 0;
+
+                if (canvasRatio > videoRatio) {
+                    drawHeight = fullCanvas.width / videoRatio;
+                    offsetY = (fullCanvas.height - drawHeight) / 2;
+                } else {
+                    drawWidth = fullCanvas.height * videoRatio;
+                    offsetX = (fullCanvas.width - drawWidth) / 2;
+                }
+                fullCtx.drawImage(video, offsetX, offsetY, drawWidth, drawHeight);
+            } else {
+                // 카메라가 없으면 흰색 바탕 처리
+                fullCtx.fillStyle = '#ffffff';
+                fullCtx.fillRect(0, 0, fullCanvas.width, fullCanvas.height);
+            }
+
+            // 2. 그 위에 지우개 작업이 된 캔버스를 덮어씌움
+            fullCtx.drawImage(canvas, 0, 0);
+
+            // 3. 사진 영역(imgBounds)만 딱 맞게 잘라내기 위한 최종 캔버스
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = cw;
+            cropCanvas.height = ch;
+            const cropCtx = cropCanvas.getContext('2d');
+
+            cropCtx.drawImage(fullCanvas, cx, cy, cw, ch, 0, 0, cw, ch);
+
+            // 4. 저장
+            const link = document.createElement('a');
+            link.download = 'AR_design_capture.png';
+            link.href = cropCanvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // 캔버스 크기를 창 크기에 맞춤 (회전 대응 로직 포함)
+        function resizeCanvas() {
+            let tempEditedCanvas = null;
+
+            // 리사이즈 전에 기존 작업 내역(투명해진 부분)을 보존하기 위해 
+            // 현재 화면의 이미지 렌더링 영역만 캡처하여 임시 저장
+            if (currentImg && imgBounds && canvas.width > 0 && canvas.height > 0) {
+                const cx = Math.floor(imgBounds.x);
+                const cy = Math.floor(imgBounds.y);
+                const cw = Math.floor(imgBounds.w);
+                const ch = Math.floor(imgBounds.h);
+
+                if (cw > 0 && ch > 0) {
+                    tempEditedCanvas = document.createElement('canvas');
+                    tempEditedCanvas.width = cw;
+                    tempEditedCanvas.height = ch;
+                    const tempCtx = tempEditedCanvas.getContext('2d');
+                    tempCtx.drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+                }
+            }
+
+            // 새로운 창 크기로 캔버스 재설정
+            canvas.width = appContainer.clientWidth;
+            canvas.height = appContainer.clientHeight;
+            undoHistory = []; // 창 크기가 변하면 이미지 크기가 달라지므로 히스토리 초기화
+            
+            // 이미지가 있으면 새로운 비율에 맞춰서 임시 캔버스(작업 내역)를 덮어씌움
+            if (currentImg) {
+                drawImageOnCanvas(currentImg, tempEditedCanvas);
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 메시지 모달 표시 함수
+        function showMessage(title, message) {
+            messageTitle.textContent = title;
+            messageBody.textContent = message;
+            messageModal.classList.remove('hidden');
+        }
+
+        closeModalBtn.addEventListener('click', () => {
+            messageModal.classList.add('hidden');
+        });
+
+        // 사진 불러오기
+        imageLoader.addEventListener('change', handleImage, false);
+
+        function handleImage(e) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    currentImg = img;
+                    undoHistory = []; // 새 이미지를 불러오면 히스토리 초기화
+                    drawImageOnCanvas(img);
+                }
+                img.src = event.target.result;
+            }
+            if (e.target.files && e.target.files[0]) {
+                reader.readAsDataURL(e.target.files[0]);
+            }
+        }
+
+        // 샘플사진 불러오기
+        sampleImageBtn.addEventListener('click', () => {
+            const img = new Image();
+            img.crossOrigin = "Anonymous"; // 캔버스 보안 에러 방지
+            img.onload = function() {
+                currentImg = img;
+                undoHistory = []; // 새 이미지를 불러오면 히스토리 초기화
+                drawImageOnCanvas(img);
+            }
+            img.onerror = function() {
+                showMessage("오류", "같은 폴더에 'image.png' 파일이 없습니다.");
+            }
+            img.src = 'image.png'; // 상대 경로로 image.png 불러오기
+        });
+
+        // 이미지를 캔버스 중앙에 비율에 맞게 그리기 (복구할 캔버스가 있으면 그걸 사용)
+        function drawImageOnCanvas(img, restoreCanvas = null) {
+            ctx.globalCompositeOperation = 'source-over';
+            
+            const canvasRatio = canvas.width / canvas.height;
+            const imgRatio = img.width / img.height;
+            
+            let drawWidth = canvas.width;
+            let drawHeight = canvas.height;
+            let offsetX = 0;
+            let offsetY = 0;
+
+            if (canvasRatio > imgRatio) {
+                drawHeight = canvas.height;
+                drawWidth = canvas.height * imgRatio;
+                offsetX = (canvas.width - drawWidth) / 2;
+                offsetY = 0;
+            } else {
+                drawWidth = canvas.width;
+                drawHeight = canvas.width / imgRatio;
+                offsetX = 0;
+                offsetY = (canvas.height - drawHeight) / 2;
+            }
+
+            imgBounds = { x: offsetX, y: offsetY, w: drawWidth, h: drawHeight };
+
+            // 1. 캔버스 초기화
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. 캔버스 전체를 흰색으로 채움 (여백 방지용)
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 3. 사진이 들어갈 공간만 다시 투명하게 뚫어줌 (원본 PNG 투명도 보존을 위해)
+            ctx.clearRect(offsetX, offsetY, drawWidth, drawHeight);
+
+            // 4. 이미지 그림 (작업 내역이 있는 경우 해당 캔버스를, 아니면 원본을 그림)
+            if (restoreCanvas) {
+                ctx.drawImage(restoreCanvas, offsetX, offsetY, drawWidth, drawHeight);
+            } else {
+                ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+            }
+        }
+
+        // 지우개(그리기) 기능 구현
+        function getMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            if (evt.touches) {
+                return {
+                    x: evt.touches[0].clientX - rect.left,
+                    y: evt.touches[0].clientY - rect.top
+                };
+            }
+            return {
+                x: evt.clientX - rect.left,
+                y: evt.clientY - rect.top
+            };
+        }
+
+        // 마법봉(Flood Fill) 자동 지우개 기능
+        function executeAutoErase(startX, startY) {
+            if (startX < 0 || startX >= canvas.width || startY < 0 || startY >= canvas.height) return;
+
+            if (imgBounds) {
+                if (startX < imgBounds.x || startX > imgBounds.x + imgBounds.w || 
+                    startY < imgBounds.y || startY > imgBounds.y + imgBounds.h) {
+                    return;
+                }
+            }
+
+            const width = canvas.width;
+            const height = canvas.height;
+            const ctxData = ctx.getImageData(0, 0, width, height);
+            const data = ctxData.data;
+            
+            const startIndex = (startY * width + startX) * 4;
+            const startR = data[startIndex];
+            const startG = data[startIndex + 1];
+            const startB = data[startIndex + 2];
+            const startA = data[startIndex + 3];
+
+            if (startA === 0) return; 
+
+            const tolerance = parseInt(toleranceInput.value);
+
+            const stack = [startX, startY];
+            const visited = new Uint8Array(width * height);
+            visited[startY * width + startX] = 1;
+
+            function isMatch(r, g, b, a) {
+                if (a === 0) return false;
+                const dist = Math.sqrt(Math.pow(r - startR, 2) + Math.pow(g - startG, 2) + Math.pow(b - startB, 2));
+                return dist <= tolerance;
+            }
+
+            let x, y, idx, nx, ny, px, nIdx;
+            const dx = [0, 0, 1, -1];
+            const dy = [1, -1, 0, 0];
+
+            const minX = imgBounds ? Math.floor(imgBounds.x) : 0;
+            const maxX = imgBounds ? Math.ceil(imgBounds.x + imgBounds.w) : width;
+            const minY = imgBounds ? Math.floor(imgBounds.y) : 0;
+            const maxY = imgBounds ? Math.ceil(imgBounds.y + imgBounds.h) : height;
+
+            while(stack.length > 0) {
+                y = stack.pop();
+                x = stack.pop();
+                
+                idx = (y * width + x) * 4;
+                data[idx + 3] = 0; 
+
+                for(let i=0; i<4; i++) {
+                    nx = x + dx[i];
+                    ny = y + dy[i];
+                    
+                    if (nx >= minX && nx < maxX && ny >= minY && ny < maxY) {
+                        px = ny * width + nx;
+                        if (visited[px] === 0) {
+                            visited[px] = 1;
+                            nIdx = px * 4;
+                            if (isMatch(data[nIdx], data[nIdx+1], data[nIdx+2], data[nIdx+3])) {
+                                stack.push(nx, ny);
+                            }
+                        }
+                    }
+                }
+            }
+
+            ctx.putImageData(ctxData, 0, 0);
+        }
+
+        function startDrawing(e) {
+            if (!currentImg || !isAdvancedMode) return; // 고급 편집 모드가 아닐 때는 지우기 동작 안 함
+            
+            saveState(); // 그리기 시작 전 상태 저장
+
+            if (currentTool === 'manual') {
+                isDrawing = true;
+                erase(e);
+            } else if (currentTool === 'auto') {
+                e.preventDefault(); 
+                const pos = getMousePos(e);
+                executeAutoErase(Math.floor(pos.x), Math.floor(pos.y));
+            }
+        }
+
+        function stopDrawing() {
+            if (currentTool === 'manual') {
+                isDrawing = false;
+                ctx.beginPath();
+            }
+        }
+
+        function erase(e) {
+            if (!isDrawing || !currentImg || currentTool !== 'manual') return;
+            e.preventDefault(); 
+            
+            const pos = getMousePos(e);
+            const brushSize = parseInt(brushSizeInput.value);
+
+            ctx.save(); 
+
+            if (imgBounds) {
+                ctx.beginPath();
+                ctx.rect(imgBounds.x, imgBounds.y, imgBounds.w, imgBounds.h);
+                ctx.clip();
+            }
+
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = brushSize * 2;
+
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+            
+            ctx.arc(pos.x, pos.y, brushSize, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+
+            ctx.restore(); 
+        }
+
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', erase);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseleave', stopDrawing);
+
+        canvas.addEventListener('touchstart', startDrawing, { passive: false });
+        canvas.addEventListener('touchmove', erase, { passive: false });
+        canvas.addEventListener('touchmove', function(e) {
+            // 고급편집 모드에서 드로잉 중일때는 화면 스크롤을 막습니다
+            if(isDrawing && isAdvancedMode) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+        canvas.addEventListener('touchend', stopDrawing);
+
+        // 원본 복구 버튼
+        resetCanvasBtn.addEventListener('click', () => {
+            if (currentImg) {
+                saveState(); // 원본 복구 전에도 되돌릴 수 있도록 저장
+                // 원본을 그릴 때는 임시 캔버스를 인자로 넘기지 않으므로 원본 파일 상태로 초기화됨
+                drawImageOnCanvas(currentImg);
+            } else {
+                showMessage("안내", "먼저 사진을 불러와주세요.");
+            }
+        });
+
+        // 카메라 초기화 및 켜기 함수
+        async function initCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" } 
+                });
+                video.srcObject = stream;
+                
+                startCamBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> 카메라 끄기';
+                startCamBtn.classList.replace('bg-indigo-600', 'bg-red-500');
+                startCamBtn.classList.replace('hover:bg-indigo-700', 'hover:bg-red-600');
+            } catch (err) {
+                console.error("카메라 접근 에러:", err);
+                showMessage("카메라 오류", "카메라를 사용할 수 없습니다. 권한을 허용했는지 확인해주세요.");
+            }
+        }
+
+        // 웹페이지 시작 시 자동으로 카메라 켜기
+        window.addEventListener('DOMContentLoaded', () => {
+            initCamera();
+        });
+
+        // 카메라 켜기/끄기 토글 이벤트
+        startCamBtn.addEventListener('click', async () => {
+            if (stream) {
+                const tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
+                stream = null;
+                startCamBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg> 카메라 켜기';
+                startCamBtn.classList.replace('bg-red-500', 'bg-indigo-600');
+                startCamBtn.classList.replace('hover:bg-red-600', 'hover:bg-indigo-700');
+                return;
+            }
+
+            await initCamera();
+        });
+
+    </script>
+</body>
+</html>
